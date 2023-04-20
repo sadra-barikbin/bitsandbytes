@@ -291,13 +291,17 @@ class Linear8bitLt(nn.Linear):
             input_name = key[len(prefix):]
             if input_name == "SCB":
                 if self.weight.SCB is None:
-                    # buffers not yet initialized, can't call them directly without
+                    # buffers not yet initialized, can't assign them directly without calling .cuda
                     raise RuntimeError("Loading a quantized checkpoint into non-quantized Linear8bitLt is "
                                        "not supported. Please call module.cuda() before module.load_state_dict()")
 
                 input_param = state_dict[key]
                 self.weight.SCB.copy_(input_param)
                 unexpected_keys.remove(key)
+                break
+        else:
+            if self.weight.SCB is not None:
+                raise RuntimeError("Loading a non-quantized checkpoint into quantized Linear8bitLt is not supported.")
 
     def init_8bit_state(self):
         self.state.CB = self.weight.CB

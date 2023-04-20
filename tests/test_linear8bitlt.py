@@ -69,9 +69,11 @@ def test_linear_no_igemmlt():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="this test requires a GPU")
-@pytest.mark.parametrize("has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt",
-                         list(product([False, True], [False, True], [False, True], [False, True])))
-def test_linear_serialization(has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt):
+@pytest.mark.parametrize(
+    "has_fp16_weights, new_has_fp16_weights, serialize_before_forward, deserialize_before_cuda, force_no_igemmlt",
+    list(product([False, True], [False, True], [False, True], [False, True], [False, True])))
+def test_linear_serialization(has_fp16_weights, new_has_fp16_weights, serialize_before_forward,
+                              deserialize_before_cuda, force_no_igemmlt):
     linear = torch.nn.Linear(32, 96)
     x = torch.randn(3, 32, dtype=torch.half)
 
@@ -118,7 +120,7 @@ def test_linear_serialization(has_fp16_weights, serialize_before_forward, deseri
         linear.in_features,
         linear.out_features,
         linear.bias is not None,
-        has_fp16_weights=has_fp16_weights,
+        has_fp16_weights=new_has_fp16_weights,
         threshold=6.0,
     )
     if force_no_igemmlt:
@@ -131,13 +133,27 @@ def test_linear_serialization(has_fp16_weights, serialize_before_forward, deseri
     new_linear_custom = new_linear_custom.cuda()
 
     if not deserialize_before_cuda:
-        new_linear_custom.load_state_dict(new_state_dict, strict=True)
+        with nullcontext() if (has_fp16_weights == new_has_fp16_weights) else pytest.raises(RuntimeError):
+            new_linear_custom.load_state_dict(new_state_dict, strict=True)
 
     x_second = x.clone().cuda().requires_grad_(True)
     fx_second = new_linear_custom(x_second).float()
     (fx_second * grad_proj).mean().backward()
 
-    # if 8-bit weights were loaded before .cuda, state is incorrect anyway and RuntimeError was raised
-    if has_fp16_weights or not deserialize_before_cuda:
-        assert torch.allclose(fx_first, fx_second, atol=1e-5)
-        assert torch.allclose(x_first.grad, x_second.grad, atol=1e-5)
+    # if we tried to load a quantized checkpoint into a non-quantized model or vice versa,
+    # state is incorrect anyway and RuntimeError was raised
+    if ((deserialize_before_cuda and has_fp16_weights) or
+        (not deserialize_before_cuda and has_fp16_weights == new_has_fp16_weights)):
+        if has_fp16_weights == new_has_fp16_weights:
+            atol = 1e-8
+        else:
+            atol = 1e-3
+        assert torch.allclose(fx_first, fx_second, atol=atol)
+        assert torch.allclose(x_first.grad, x_second.grad, atol=atol)
+
+    x_orig = x.clone().cuda().requires_grad_(True)
+    fx_orig = linear_custom(x_orig).float()
+    (fx_orig * grad_proj).mean().backward()
+
+    assert torch.allclose(fx_first, fx_orig, atol=1e-8)
+    assert torch.allclose(x_first.grad, x_orig.grad, atol=1e-8)
