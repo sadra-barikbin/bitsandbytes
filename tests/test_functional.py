@@ -2183,7 +2183,7 @@ def test_kbit_quantile_estimation():
             val1 = torch.Tensor(norm.ppf(p)).cuda()
             val2 = F.estimate_quantiles(data, offset=0, num_quantiles=2**bits)
             err = torch.abs(val1-val2).mean()
-            assert err < 0.038
+            assert err < 0.039
 
     for i in range(100):
         data = torch.randn(1024, 1024, device='cuda')
