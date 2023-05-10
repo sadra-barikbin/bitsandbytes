@@ -199,7 +199,7 @@ class Params4bit(torch.nn.Parameter):
             return new_param
 
 class Linear4bit(nn.Linear):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True, quant_type='fp4'):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=torch.float32, compress_statistics=True, quant_type='fp4'):
         super().__init__(input_features, output_features, bias)
         self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type)
         self.compute_dtype = compute_dtype
@@ -219,15 +219,16 @@ class Linear4bit(nn.Linear):
         out = bnb.matmul_4bit(x, self.weight.t(), bias=bias, quant_state=self.weight.quant_state)
 
         out = out.to(inp_dtype)
+        print(self.weight.quant_state)
 
         return out
 
 class LinearFP4(Linear4bit):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=torch.float32, compress_statistics=True):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'fp4')
 
 class LinearNF4(Linear4bit):
-    def __init__(self, input_features, output_features, bias=True, compute_dtype=None, compress_statistics=True):
+    def __init__(self, input_features, output_features, bias=True, compute_dtype=torch.float32, compress_statistics=True):
         super().__init__(input_features, output_features, bias, compute_dtype, compress_statistics, 'nf4')
 
 
@@ -241,12 +242,14 @@ class Int8Params(torch.nn.Parameter):
         CB=None,
         SCB=None,
     ):
-        cls.has_fp16_weights = has_fp16_weights
-        cls.CB = None
-        cls.SCB = None
         if data is None:
             data = torch.empty(0)
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        self.CB = None
+        self.SCB = None
+        self.has_fp16_weights = has_fp16_weights
+        self.data = data
+        return self
 
     def cuda(self, device):
         if self.has_fp16_weights:
@@ -254,11 +257,14 @@ class Int8Params(torch.nn.Parameter):
         else:
             # we store the 8-bit rows-major weight
             # we convert this weight to the turning/ampere weight during the first inference pass
+            #assert self.data.dtype in [torch.float16, torch.bfloat16, torch.float32]
+            #print(self.data.dtype)
             B = self.data.contiguous().half().cuda(device)
             CB, CBt, SCB, SCBt, coo_tensorB = bnb.functional.double_quant(B)
             del CBt
             del SCBt
             self.data = CB
+            #print(SCB, B.dtype, B)
             setattr(self, "CB", CB)
             setattr(self, "SCB", SCB)
 
@@ -358,6 +364,7 @@ class Linear8bitLt(nn.Linear):
                               missing_keys, unexpected_keys, error_msgs):
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
                                       error_msgs)
+        print('LOADIND')
         for key in unexpected_keys:
             input_name = key[len(prefix):]
             if input_name == "SCB":
