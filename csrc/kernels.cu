@@ -134,7 +134,7 @@ __device__ unsigned char dQuantizeFP4(float x)
 
   // we do a binary search
   // the pivots are divided by 12 (the FP4 absmax)
-  // since we assum input data is in [-1.0, 1.0]
+  // since we assume input data is in [-1.0, 1.0]
 
   // !be careful here, its easy to make a mistake
   // that is difficult to noice if you add an extra
